@@ -34,8 +34,10 @@ struct ArbioPRMenuApp: App {
                     store.refreshIfStale()
                 }
         } label: {
-            HStack(spacing: 3) {
+            HStack(spacing: 4) {
                 Image(systemName: "arrow.triangle.pull")
+                Text("PR")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
                 if let badge = statusBadge {
                     Image(systemName: badge.symbol)
                     if badge.count > 0 {
