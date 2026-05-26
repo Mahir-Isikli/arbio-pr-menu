@@ -23,50 +23,83 @@ private enum AppSettings {
 }
 
 @main
-@MainActor
 struct ArbioPRMenuApp: App {
-    @StateObject private var store = PRStore()
+    @NSApplicationDelegateAdaptor(ArbioPRMenuAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            PRMenuView(store: store)
-                .onAppear {
-                    store.refreshIfStale()
-                }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.triangle.pull")
-                Text("PR")
-                    .font(.system(size: 11, weight: .semibold, design: .rounded))
-                if let badge = statusBadge {
-                    Image(systemName: badge.symbol)
-                    if badge.count > 0 {
-                        Text("\(badge.count)")
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                    }
-                }
-            }
-        }
-        .menuBarExtraStyle(.window)
-
         Settings {
             EmptyView()
         }
     }
+}
 
-    private var statusBadge: (symbol: String, count: Int)? {
-        let activePRs = store.prs.filter { !$0.isDraft }
-        let ownActionCount = activePRs.filter(\.needsMyAction).count
-        let deployActionCount = store.mergedPRs.filter(\.needsDeploymentAttention).count
-        let reviewCount = store.reviewPRs.count
-        let actionCount = ownActionCount + deployActionCount + reviewCount
-        let waitingCount = activePRs.filter(\.isWaitingOnReview).count + store.reviewedPRs.filter(\.hasNewCommitsAfterMyReview).count
-        let runningCount = activePRs.filter { $0.ciSummary.kind == .running }.count + store.mergedPRs.filter(\.isDeploying).count
+@MainActor
+final class ArbioPRMenuAppDelegate: NSObject, NSApplicationDelegate {
+    private let store = PRStore()
+    private var statusItem: NSStatusItem?
+    private var popover: NSPopover?
+    private var window: NSWindow?
 
-        if actionCount > 0 { return ("exclamationmark.circle.fill", actionCount) }
-        if runningCount > 0 { return ("circle.dotted", runningCount) }
-        if waitingCount > 0 { return ("clock.circle.fill", waitingCount) }
-        return nil
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        installStatusItem()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            self?.showWindow()
+        }
+    }
+
+    private func installStatusItem() {
+        let statusItem = NSStatusBar.system.statusItem(withLength: 86)
+        self.statusItem = statusItem
+
+        if let button = statusItem.button {
+            button.image = nil
+            button.title = "PR MENU"
+            button.font = .systemFont(ofSize: 12, weight: .semibold)
+            button.toolTip = "Arbio PR Menu"
+            button.target = self
+            button.action = #selector(togglePopover(_:))
+        }
+
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentSize = NSSize(width: 580, height: 700)
+        popover.contentViewController = NSHostingController(rootView: PRMenuView(store: store))
+        self.popover = popover
+    }
+
+    private func showWindow() {
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 700),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Arbio PR Menu"
+        window.contentViewController = NSHostingController(rootView: PRMenuView(store: store))
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        self.window = window
+        store.refreshIfStale()
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func togglePopover(_ sender: NSStatusBarButton) {
+        guard let popover else { return }
+
+        if popover.isShown {
+            popover.performClose(sender)
+        } else {
+            store.refreshIfStale()
+            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 }
 
